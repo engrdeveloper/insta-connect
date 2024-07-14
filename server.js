@@ -14,6 +14,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
 app.use(
   session({
@@ -34,6 +35,13 @@ app.use(
 
 // business_management is required as instagram is conencted to business page
 // email and public_profile are required for login
+
+// Following permissions are required for the messging: https://developers.facebook.com/docs/messenger-platform/instagram/
+// - instagram_basic
+// - instagram_manage_messages
+// - pages_manage_metadata
+// - pages_show_list
+// - business_management
 
 // Configure Passport.js
 passport.use(
@@ -64,13 +72,14 @@ passport.deserializeUser((user, done) => {
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Step 1: Construct the Login URL
+// Construct the Login URL
 app.get(
   "/auth/instagram",
   passport.authenticate("facebook", {
     scope: [
       "email",
       "public_profile",
+      "pages_messaging",
       "business_management",
       "instagram_basic",
       "instagram_manage_messages",
@@ -95,8 +104,11 @@ app.get(
       )
       .then((response) => {
         const pages = response.data.data;
-        // Assuming user selects the first page
-        const page = pages[0];
+
+        // For each page subscribe webhook
+        for (const page of pages) {
+          webhookSubscribe(page.access_token, page.id);
+        }
         res.json({
           userToken: longLivedToken,
           pages,
@@ -110,9 +122,61 @@ app.get(
 );
 
 app.post("/webhook", (req, res) => {
-  console.log("Incoming webhook message:", JSON.stringify(req.body, null, 2));
-  res.sendStatus(200);
+  const body = req.body;
+
+  // Process incoming message event
+  if (body.object === "page" && body.entry) {
+    body.entry.forEach((entry) => {
+      sendReply(entry.messaging[0].sender.id, PAGE_ACCESS_TOKEN);
+    });
+  }
+  res.status(200).end();
 });
+
+/**
+ * Sends a reply message to the sender.
+ * @param {string} senderId - The ID of the sender.
+ * @param {string} pageAccessToken - The access token for the page.
+ */
+const sendReply = async (senderId, pageAccessToken) => {
+  try {
+    // Send a message to the sender using the Facebook Graph API
+    await axios.post(`https://graph.facebook.com/v20.0/me/messages`, {
+      recipient: {
+        id: senderId,
+      },
+      message: {
+        text: "Thanks for your Message",
+      },
+      access_token: pageAccessToken,
+    });
+    console.log("Reply sent successfully");
+  } catch (error) {
+    console.error("Error sending reply:", error.response.data);
+  }
+};
+
+/**
+ * Subscribes the webhook to the specified page.
+ * @param {string} pageAccessToken - The access token for the page.
+ * @param {string} pageId - The ID of the page.
+ */
+const webhookSubscribe = async (pageAccessToken, pageId) => {
+  try {
+    // Subscribe the webhook to the page for the 'messages' field.
+    const response = await axios.post(
+      `https://graph.facebook.com/v20.0/${pageId}/subscribed_apps`,
+      {
+        subscribed_fields: ["messages"], // The field to subscribe to.
+        access_token: pageAccessToken, // The access token for the page.
+      }
+    );
+    console.log("Webhook subscribed successfully:", response.data);
+  } catch (error) {
+    // Log the error if there was an issue subscribing to the webhook.
+    console.error("Error subscribing to webhook:", error.response.data);
+  }
+};
 
 // accepts GET requests at the /webhook endpoint. You need this URL to setup webhook initially.
 // info on verification request payload: https://developers.facebook.com/docs/graph-api/webhooks/getting-started#verification-requests
