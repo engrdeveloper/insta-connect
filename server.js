@@ -124,6 +124,9 @@ app.get(
 app.post("/webhook", (req, res) => {
   const body = req.body;
 
+  console.log(`\u{1F7EA} Received webhook:`);
+  console.dir(body, { depth: null });
+
   // Process incoming message event
   if (body.object && body.entry) {
     body.entry.forEach((entry) => {
