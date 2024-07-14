@@ -125,7 +125,7 @@ app.post("/webhook", (req, res) => {
   const body = req.body;
 
   // Process incoming message event
-  if (body.object === "page" && body.entry) {
+  if (body.object && body.entry) {
     body.entry.forEach((entry) => {
       sendReply(entry.messaging[0].sender.id, PAGE_ACCESS_TOKEN);
     });
